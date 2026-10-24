@@ -1,0 +1,47 @@
+{
+  "name": "Stream Media",
+  "version": "3.4.1",
+  "author": "Hesper user",
+  "description": "Netflix-style browsing for movies and TV (top bar, billboard with trailer, wide rows, detail page with cast and episodes), then press Play: the best stream is chosen automatically. On TV a trailer plays when a title is highlighted; on phones you get the description. Uses its own built-in TMDb access, so there is no key to enter (you can still add your own).",
+  "warning": {
+    "title": "Before you install",
+    "text": [
+      "Use a VPN or proxy before installing or using this plugin. It connects to outside websites, which can expose your IP address.",
+      "This plugin is third-party. It is not associated with, made by, or endorsed by PEK or PEK Industries, and they are not responsible for it or how it is used."
+    ],
+    "button": "I understand, continue"
+  },
+  "permissions": {
+    "network": [
+      "snake-skin-tmdb.aquariusibeats.workers.dev",
+      "api.themoviedb.org",
+      "image.tmdb.org",
+      "www.youtube-nocookie.com",
+      "bt4gprx.com",
+      "apibay.org",
+      "yify.mobi",
+      "1337x.to",
+      "thepiratebay.party",
+      "bitsearch.eu"
+    ],
+    "storage": true,
+    "library": true,
+    "torrent": true,
+    "favorites": true,
+    "providers": true,
+    "plugins": true,
+    "device": true
+  },
+  "ui": {
+    "navTab": "Stream Media",
+    "reloadOnInstall": true,
+    "closeOnRemove": true
+  },
+  "provides": {
+    "stream": true
+  },
+  "flutter": {
+    "screen": "screen.py"
+  },
+  "icon": "icon.png"
+}
