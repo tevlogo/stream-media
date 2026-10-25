@@ -23,6 +23,7 @@ import stream_search as ss
 API = "https://api.themoviedb.org/3"                                   # only used with a personal key
 PROXY = "https://snake-skin-tmdb.aquariusibeats.workers.dev"          # the plugin's own TMDb worker (holds its key)
 IMG = "https://image.tmdb.org/t/p/w342"
+IMG_WIDE = "https://image.tmdb.org/t/p/w780"          # backdrops (16:9) for landscape cards on a TV
 IMG_PERSON = "https://image.tmdb.org/t/p/w185"
 IMG_LOGO = "https://image.tmdb.org/t/p/w92"
 IMG_STILL = "https://image.tmdb.org/t/p/w300"             # episode stills (16:9)
@@ -178,6 +179,7 @@ def map_item(r, kind):
         "date": str(date or ""),
         "poster": IMG + r["poster_path"] if r.get("poster_path") else "",
         "poster_path": r.get("poster_path") or "",
+        "backdrop": IMG_WIDE + r["backdrop_path"] if r.get("backdrop_path") else "",
         "overview": str(r.get("overview") or ""),
         "rating": float(vote) if isinstance(vote, (int, float)) else 0.0,
         "votes": r.get("vote_count") or 0,
@@ -186,7 +188,7 @@ def map_item(r, kind):
 
 def stub_item(tmdb_id, kind, title, year):
     return {"id": tmdb_id, "type": kind, "title": title, "alt": "", "year": year, "date": "", "poster": "",
-            "poster_path": "", "overview": "", "rating": 0.0, "votes": 0}
+            "poster_path": "", "backdrop": "", "overview": "", "rating": 0.0, "votes": 0}
 
 
 def owned(item):
@@ -725,6 +727,8 @@ def open_detail(item, auto_play=False):
         if not item["poster_path"] and j.get("poster_path"):
             item["poster_path"] = j["poster_path"]
             item["poster"] = IMG + j["poster_path"]
+            if j.get("backdrop_path") and not item.get("backdrop"):
+                item["backdrop"] = IMG_WIDE + j["backdrop_path"]
         if not item["rating"]:
             item["rating"] = float(j.get("vote_average") or 0)
             item["votes"] = j.get("vote_count") or 0
@@ -1194,7 +1198,7 @@ def episode_rows(d):
         etitle = "E%s \u00b7 %s" % (e["n"], e["name"] or "Episode %s" % e["n"])
         go = lambda e=e, aired=aired: play_episode(d, e, aired)
         if hasattr(ui, "episode_row"):      # newer PEK: the episode's picture and description
-            out.append(ui.episode_row(etitle, sub, clip(e["overview"], 220), IMG_STILL + e["still"] if e["still"] else "",
+            out.append(ui.episode_row(etitle, sub, clip(e["overview"], 600), IMG_STILL + e["still"] if e["still"] else "",
                                       dim=not aired, on=go))
         else:                               # older PEK: the plain row
             if e["overview"]:
@@ -1258,7 +1262,8 @@ def poster(item, focus_key=""):
     sub = " \u00b7 ".join([str(x) for x in (item["year"] or "", "TV" if item["type"] == "tv" else "Movie") if x])
     mine = owned(item)
     return ui.poster_card(item["title"], sub + " \u00b7 In your library" if mine else sub, item["poster"],
-                          lambda: open_detail(item), badge=badge_for(item, mine), autofocus=focus_key)
+                          lambda: open_detail(item), badge=badge_for(item, mine), autofocus=focus_key,
+                          backdrop=item.get("backdrop", ""), wide=True)
 
 
 def poster_row(items, focus_key=""):
@@ -1316,7 +1321,8 @@ def hero():
                      ui.text(" \u00b7 ".join(meta) + (" \u00b7 Not out yet" if gone else "") + (" \u00b7 In your library" if owned(it) else "")),
                      ui.text(clip(it["overview"], c["text"])),
                      ui.row(play, info_btn))
-    art = ui.grid([ui.poster_card(it["title"], "", it["poster"], lambda: open_detail(it), badge=badge_for(it, owned(it)))],
+    art = ui.grid([ui.poster_card(it["title"], "", it["poster"], lambda: open_detail(it), badge=badge_for(it, owned(it)),
+                                backdrop=it.get("backdrop", ""), wide=True)],
                   min_col=c["hero"], scroll=True)
     return ui.column(ui.heading("Featured today" if tv_mode() else "Featured"), ui.row(art, text))
 

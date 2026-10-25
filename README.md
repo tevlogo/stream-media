@@ -1,11 +1,11 @@
 # Stream Media
 
-A third-party  Petv plugin with a streaming-app layout: **Home / Movies / TV Shows** tabs, a featured title,
+A third-party Hesper plugin with a streaming-app layout: **Home / Movies / TV Shows** tabs, a featured title,
 rows (trending, top rated, coming soon, genres), **Categories**, streaming-service filters, ratings on every
 poster, trailers, cast, director/creator, networks, and **Play**.
 
 ## Backdrop billboard
-On a Pektv build that supports `ui.hero` (the bundled `plugin_sandbox.js` / `style.css` update), the featured title is a
+On a Hesper build that supports `ui.hero` (the bundled `plugin_sandbox.js` / `style.css` update), the featured title is a
 full-width backdrop with title, rating, blurb and Play / Info buttons. Titles with no trailer also get a backdrop header.
 On older builds the poster billboard is used instead, so nothing breaks.
 
@@ -33,6 +33,8 @@ lists the alternatives in case one was bad.
 2. **Search sites (no Torznab needed).** The list lives between the `SITES-START` / `SITES-END` markers in
    `ui.js` and `release_search.py`. Easiest: run `python add_site.py "https://site/search?q={q}"` (from the
    plugin folder's parent, see add_site.py); it adds the link to both files and the host to `plugin.json`.
+   No sites are built in: Stream Media only searches the sites you add. Reinstall the plugin after changing sites.
+3. **A Hesper build with the torrent engine** (otherwise the Play button says it can't play torrents).
 
 ## Permissions (shown when you install it)
 - `network`: snake-skin-tmdb.aquariusibeats.workers.dev, api.themoviedb.org, image.tmdb.org, www.youtube-nocookie.com
@@ -122,3 +124,9 @@ The whole screen now follows the Netflix layout (needs the PEK TV / PEK Android 
 ## 3.4.1
 - Stream Media now has its own picture (`icon.png`, set in plugin.json), shown on the Plugins page, the More page pins and the dashboard shortcut.
 - Pictures no longer stay blank until you refresh: a TMDb request that fails (a slow or cold worker, a 429 / 5xx answer, a dropped connection) is tried again by itself for up to about 11 seconds before the row shows an error. Posters that could not load are asked for again by the app (see FLUTTER.md, "Pictures that heal themselves").
+
+## 3.4.2
+- Trailer is full width and covers the top half of the screen on a TV, plays with no YouTube controls, play button or icons, and scrolls away with the page instead of staying pinned over the buttons.
+- Remote: the D-pad no longer gets stuck in search boxes.
+- Movie and show cards are landscape on a TV and portrait on a phone.
+- Episode descriptions are shown in full on a phone.
