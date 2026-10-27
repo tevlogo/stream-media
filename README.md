@@ -130,3 +130,6 @@ The whole screen now follows the Netflix layout (needs the PEK TV / PEK Android 
 - Remote: the D-pad no longer gets stuck in search boxes.
 - Movie and show cards are landscape on a TV and portrait on a phone.
 - Episode descriptions are shown in full on a phone.
+
+## 3.5.0
+- Rate what you watch: the detail page has a "Rate this movie / show" line with buttons 1 to 10. It is your own rating in PEK TV (the same one shown on the posters and sent to Trakt); press the number you already gave to take the rating off. This needs the new "watched" permission, which is why the plugin asks for it.

@@ -1526,6 +1526,9 @@ def detail_view():
         kids.append(ui.row(top))
         if S["fav_msg"]:
             kids.append(ui.text(S["fav_msg"]))
+        # Your own 1 to 10 rating: the same one PEK TV shows on its posters and sends to Trakt. Plain number buttons (this plugin
+        # keeps symbols out of its buttons).
+        kids.append(ui.rating_stars("show" if item["type"] == "tv" else "movie", item["title"], item["year"], plain=True))
     kids.append(ui.heading(item["title"]))
     cert = certification(item, info) if info else ""
     runtime = info.get("runtime") or ((info.get("episode_run_time") or [0])[0] if info.get("episode_run_time") else 0)

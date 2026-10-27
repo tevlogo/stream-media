@@ -1,6 +1,6 @@
 {
   "name": "Stream Media",
-  "version": "3.4.2",
+  "version": "3.5.0",
   "author": "Hesper user",
   "description": "Netflix-style browsing for movies and TV (top bar, billboard with trailer, wide rows, detail page with cast and episodes), then press Play: the best stream is chosen automatically. On TV a trailer plays when a title is highlighted; on phones you get the description. Uses its own built-in TMDb access, so there is no key to enter (you can still add your own).",
   "warning": {
@@ -30,7 +30,8 @@
     "favorites": true,
     "providers": true,
     "plugins": true,
-    "device": true
+    "device": true,
+    "watched": true
   },
   "ui": {
     "navTab": "Stream Media",
