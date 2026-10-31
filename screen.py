@@ -23,7 +23,8 @@ import stream_search as ss
 API = "https://api.themoviedb.org/3"                                   # only used with a personal key
 PROXY = "https://snake-skin-tmdb.aquariusibeats.workers.dev"          # the plugin's own TMDb worker (holds its key)
 IMG = "https://image.tmdb.org/t/p/w342"
-IMG_WIDE = "https://image.tmdb.org/t/p/w780"          # backdrops (16:9) for landscape cards on a TV
+IMG_WIDE = "https://image.tmdb.org/t/p/w780"          # backdrops (kept on items; cards are portrait now)
+IMG_THUMB = "https://image.tmdb.org/t/p/w92"          # the small picture beside a search suggestion
 IMG_PERSON = "https://image.tmdb.org/t/p/w185"
 IMG_LOGO = "https://image.tmdb.org/t/p/w92"
 IMG_STILL = "https://image.tmdb.org/t/p/w300"             # episode stills (16:9)
@@ -68,6 +69,8 @@ S = {
     "detail": None,          # None | {"item", "loading", "info", "error", "play"}
     "hist": [],
     "query": "",
+    "sug": [],               # search suggestions for what is typed (items), shown under the search box
+    "sug_cache": {},         # typed text (lower case) -> suggestion items
     "show_cats": False,
     "hero_pick": {},
     "inflight": 0,           # browse pages being fetched (lazy rows wait their turn)
@@ -85,8 +88,8 @@ def tv_mode():
 
 def lay():
     if tv_mode():
-        return {"per_row": 20, "genre_rows": 6, "col": 220, "hero": 270, "text": 400, "cast": 20, "related": 20,
-                "eps": 50, "facts": 4, "cast_col": 170}
+        return {"per_row": 20, "genre_rows": 6, "col": 150, "hero": 170, "text": 400, "cast": 20, "related": 20,
+                "eps": 50, "facts": 4, "cast_col": 120}
     return {"per_row": 12, "genre_rows": 3, "col": 140, "hero": 120, "text": 140, "cast": 12, "related": 12,
             "eps": 25, "facts": 2, "cast_col": 110}
 
@@ -651,7 +654,61 @@ def set_query(v):
     S["query"] = v
 
 
+def type_query(text):
+    """The search box paused (PEK calls this about 0.3 s after the last key): look up a few titles that match what is typed
+    and show them in a drop-down under the box, each with a small poster."""
+    q = " ".join(str(text or "").split())
+    key = q.lower()
+    if len(q) < 2:
+        S["sug"] = []
+        return
+    if key in S["sug_cache"]:
+        S["sug"] = S["sug_cache"][key]
+        return
+
+    def work():
+        return api("/search/multi", {"query": q, "include_adult": "false"})
+
+    def done(j):
+        res = [r for r in (j.get("results") or []) if r.get("media_type") in ("movie", "tv")]
+        items = [map_item(r, "movie") for r in res]
+        items = [i for i in items if i["poster"]] + [i for i in items if not i["poster"]]     # ones with a picture first
+        items = items[:6]
+        if len(S["sug_cache"]) > 40:
+            S["sug_cache"] = {}
+        S["sug_cache"][key] = items
+        if " ".join(S["query"].split()).lower() == key:       # still what is in the box
+            S["sug"] = items
+
+    ui.background(work, done, lambda msg: None)
+
+
+def pick_suggestion(item):
+    S["sug"] = []
+    open_detail(item)
+
+
+def suggestion_rows():
+    rows = []
+    for it in S["sug"]:
+        sub = " \u00b7 ".join([str(x) for x in (it["year"] or "", "TV show" if it["type"] == "tv" else "Movie") if x])
+        thumb = IMG_THUMB + it["poster_path"] if it["poster_path"] else ""
+        rows.append(ui.suggestion(it["title"], sub, thumb, lambda it=it: pick_suggestion(it)))
+    return rows
+
+
+def search_box():
+    """The search pill. With suggestions on a PEK TV that supports them; a plain pill on an older one."""
+    try:
+        return ui.text_input("", S["query"], set_query, placeholder="Search movies and TV shows",
+                             on_submit=do_search, key="snake-search", on_type=type_query, suggestions=suggestion_rows())
+    except (TypeError, AttributeError):
+        return ui.text_input("", S["query"], set_query, placeholder="Search movies and TV shows",
+                             on_submit=do_search, key="snake-search")
+
+
 def do_search(term=None):
+    S["sug"] = []
     if term is not None:
         S["query"] = term
     term = S["query"].strip()
@@ -669,6 +726,7 @@ def do_search(term=None):
 def clear_search():
     reset_views()
     S["query"] = ""
+    S["sug"] = []
 
 
 def open_person(c):
@@ -768,6 +826,7 @@ def on_launch(intent):
     except (TypeError, ValueError):
         yr = 0
     S["query"] = ""
+    S["sug"] = []
     reset_views()
     open_detail(stub_item(tmdb_id, kind, str(intent.get("title") or "Loading\u2026"), yr))
 
@@ -1262,8 +1321,7 @@ def poster(item, focus_key=""):
     sub = " \u00b7 ".join([str(x) for x in (item["year"] or "", "TV" if item["type"] == "tv" else "Movie") if x])
     mine = owned(item)
     return ui.poster_card(item["title"], sub + " \u00b7 In your library" if mine else sub, item["poster"],
-                          lambda: open_detail(item), badge=badge_for(item, mine), autofocus=focus_key,
-                          backdrop=item.get("backdrop", ""), wide=True)
+                          lambda: open_detail(item), badge=badge_for(item, mine), autofocus=focus_key)
 
 
 def poster_row(items, focus_key=""):
@@ -1321,8 +1379,7 @@ def hero():
                      ui.text(" \u00b7 ".join(meta) + (" \u00b7 Not out yet" if gone else "") + (" \u00b7 In your library" if owned(it) else "")),
                      ui.text(clip(it["overview"], c["text"])),
                      ui.row(play, info_btn))
-    art = ui.grid([ui.poster_card(it["title"], "", it["poster"], lambda: open_detail(it), badge=badge_for(it, owned(it)),
-                                backdrop=it.get("backdrop", ""), wide=True)],
+    art = ui.grid([ui.poster_card(it["title"], "", it["poster"], lambda: open_detail(it), badge=badge_for(it, owned(it)))],
                   min_col=c["hero"], scroll=True)
     return ui.column(ui.heading("Featured today" if tv_mode() else "Featured"), ui.row(art, text))
 
@@ -1693,8 +1750,7 @@ def render():
     kids = []
     if S["tab"] != "settings":
         # One search pill (its arrow submits), then the tabs and Refresh on one line.
-        kids.append(ui.text_input("", S["query"], set_query, placeholder="Search movies and TV shows",
-                                  on_submit=do_search, key="snake-search"))
+        kids.append(search_box())
     in_search = bool(S["list"] and S["list"]["search"])
     if not S["list"]:
         kids.append(ui.row(

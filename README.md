@@ -133,3 +133,10 @@ The whole screen now follows the Netflix layout (needs the PEK TV / PEK Android 
 
 ## 3.5.0
 - Rate what you watch: the detail page has a "Rate this movie / show" line with buttons 1 to 10. It is your own rating in PEK TV (the same one shown on the posters and sent to Trakt); press the number you already gave to take the rating off. This needs the new "watched" permission, which is why the plugin asks for it.
+
+## Portrait cards, search suggestions (3.6.0)
+- On a TV the cards are portrait posters again (the landscape ones came out too small), in every row, the featured title and the grids.
+- **Search suggestions:** while you type in the search bar a drop-down lists matching movies and shows, each with a small poster.
+  On a TV press Down to walk into the list and OK to open one. Needs a PEK TV that supports `suggestions=` on the search bar; on an older
+  build the search bar works as before, without the list.
+
