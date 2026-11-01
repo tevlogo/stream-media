@@ -4,6 +4,15 @@ A third-party Hesper plugin with a streaming-app layout: **Home / Movies / TV Sh
 rows (trending, top rated, coming soon, genres), **Categories**, streaming-service filters, ratings on every
 poster, trailers, cast, director/creator, networks, and **Play**.
 
+## 3.7.1
+
+- **Up next works again for streams.** PEK's player offers the next episode in the last minutes of an episode you started from this plugin; accepting it opens the plugin on that episode and starts the best stream automatically (needs the matching PEK TV update; older builds just have no card).
+
+## 3.7.0
+
+- **Big trailer on scroll, same as TMDb Discover.** A title's trailer is always the first thing on its page: full width (top half of the screen on a TV), it scrolls away with the page and stops once it is out of view. On a TV, press Up at the top of a title to fill the screen with the trailer and Down to come back. The old "Watch trailer" button on a TV is gone; with auto-play off, the player is there and you press play.
+- **Faster opening.** The first page of each browse row is saved (data/rows.json). Rows younger than 30 minutes show at once with no network call, older ones (up to a week) show at once and refresh quietly. Every request that is still made goes through PEK TV's shared, pre-loaded TLS context (no certificate bundle reload per request), so fewer and cheaper handshakes.
+
 ## Backdrop billboard
 On a Hesper build that supports `ui.hero` (the bundled `plugin_sandbox.js` / `style.css` update), the featured title is a
 full-width backdrop with title, rating, blurb and Play / Info buttons. Titles with no trailer also get a backdrop header.

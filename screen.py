@@ -8,6 +8,7 @@ sites from release_search.py) finds the best stream and PEK plays it.
 TMDb comes from this plugin's own worker (PROXY below), or straight from TMDb with a personal key.
 Data: TMDb. Streaming availability: JustWatch (via TMDb). Trailers: YouTube.
 """
+import hashlib
 import json
 import random
 import re
@@ -31,6 +32,10 @@ IMG_STILL = "https://image.tmdb.org/t/p/w300"             # episode stills (16:9
 MAX_PAGES = 500          # TMDb does not serve pages past 500
 SETTINGS = "settings.json"
 LIBRARY = "library.json"
+ROWS = "rows.json"          # the last browse rows (page 1 of each list), so the plugin opens with pictures to show at once
+ROWS_FRESH = 30 * 60        # younger than this: shown as is, no network call (so no TLS handshake either)
+ROWS_STALE = 7 * 24 * 3600  # younger than this: shown at once, then quietly refreshed; older: loaded like the first time
+ROWS_MAX = 24
 
 MOVIE_GENRES = [(28, "Action"), (12, "Adventure"), (16, "Animation"), (35, "Comedy"), (80, "Crime"),
                 (99, "Documentary"), (18, "Drama"), (10751, "Family"), (14, "Fantasy"), (36, "History"),
@@ -77,7 +82,7 @@ S = {
     "lib": {"movies": {}, "shows": {}, "n_movies": 0, "n_shows": 0, "loaded": False},
     "auth_error": False,
     "favs": {}, "favs_seen": None, "fav_msg": "",
-    "trailer_open": "",
+    "rcache": {},            # rows key -> {"t": saved at, "d": the page}, mirrors data/rows.json
 }
 
 
@@ -391,11 +396,61 @@ def extract(src, j):
             "total": max(1, min(int(j.get("total_pages") or 1), MAX_PAGES))}
 
 
+def rows_key(k):
+    return hashlib.sha1((lang() + "|" + k).encode("utf-8")).hexdigest()[:20]
+
+
+def load_rows():
+    try:
+        j = h.read_json(ROWS)
+    except Exception:  # noqa: BLE001
+        return
+    if isinstance(j, dict):
+        S["rcache"] = {k: v for k, v in j.items()
+                       if isinstance(v, dict) and isinstance(v.get("t"), (int, float)) and isinstance(v.get("d"), dict)
+                       and isinstance(v["d"].get("items"), list)}
+
+
+def save_rows(k, data):
+    rc = S["rcache"]
+    rc[rows_key(k)] = {"t": time.time(), "d": data}
+    if len(rc) > ROWS_MAX:
+        for old in sorted(rc, key=lambda x: rc[x]["t"])[:len(rc) - ROWS_MAX]:
+            del rc[old]
+    try:
+        h.write_json(ROWS, rc)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def rows_cacheable(src, page):
+    # Only the browse rows (page 1): not searches, an actor's credits or the deeper pages of "See all".
+    return page == 1 and src.get("paged", True) and not src.get("multi") and not src.get("credits")
+
+
+def page_arrived(k, page, data):
+    cur = S["list"]
+    if cur and cur["page"] == page and page_key(cur["src"], page) == k:
+        cur["total"] = data["total"]
+    ensure_loaded()
+
+
 def load_page(src, page):
     k = page_key(src, page)
     if k in S["pages"]:
         return
-    S["pages"][k] = {"loading": True}
+    cacheable = rows_cacheable(src, page)
+    hit = S["rcache"].get(rows_key(k)) if cacheable else None
+    if hit and time.time() - hit["t"] >= ROWS_STALE:
+        hit = None
+    if hit:
+        S["pages"][k] = hit["d"]
+        if time.time() - hit["t"] < ROWS_FRESH:
+            page_arrived(k, page, hit["d"])      # fresh enough: no network call at all
+            return
+        # Old but usable: it is on screen now and is replaced when the new answer arrives (a failure keeps it).
+    else:
+        S["pages"][k] = {"loading": True}
     S["inflight"] += 1
     p = dict(src.get("params") or {})
     if src.get("paged", True):
@@ -406,17 +461,18 @@ def load_page(src, page):
 
     def done(j):
         S["inflight"] -= 1
-        S["pages"][k] = extract(src, j)
-        cur = S["list"]
-        if cur and cur["page"] == page and page_key(cur["src"], page) == k:
-            cur["total"] = S["pages"][k]["total"]
-        ensure_loaded()
+        data = extract(src, j)
+        S["pages"][k] = data
+        if cacheable:
+            save_rows(k, data)
+        page_arrived(k, page, data)
 
     def fail(msg):
         S["inflight"] -= 1
         if is_auth(msg):
             S["auth_error"] = True
-        S["pages"][k] = {"error": err_text(msg)}
+        if not hit:
+            S["pages"][k] = {"error": err_text(msg)}
         ensure_loaded()
 
     ui.background(work, done, fail)
@@ -612,6 +668,7 @@ def all_services():
 
 
 def refresh():
+    S["rcache"] = {}
     reset_data()
     S["auth_error"] = False
     S["hero_pick"] = {}
@@ -762,11 +819,12 @@ def default_season(info):
     return pick or lst[0]["season_number"]
 
 
-def open_detail(item, auto_play=False):
+def open_detail(item, auto_play=False, want=None):
     push_view()
     d = {"item": item, "loading": True, "info": None, "error": ""}
+    if want:
+        d["want"] = want          # (season, episode): PEK's "Up next" asked for this one; it plays as soon as it is found
     S["detail"] = d
-    S["trailer_open"] = ""
     ui.scroll_top()
 
     def work():
@@ -799,7 +857,10 @@ def open_detail(item, auto_play=False):
         if not item["alt"]:
             item["alt"] = str((j.get("original_name") if item["type"] == "tv" else j.get("original_title")) or "")
         if item["type"] == "tv":
-            ds = default_season(j)
+            want = d.get("want")
+            if want:
+                play_state(d)["want_ep"] = want[1]
+            ds = want[0] if want else default_season(j)
             if ds:
                 load_season(d, ds)
         if auto_play and S["detail"] is d:
@@ -828,7 +889,15 @@ def on_launch(intent):
     S["query"] = ""
     S["sug"] = []
     reset_views()
-    open_detail(stub_item(tmdb_id, kind, str(intent.get("title") or "Loading\u2026"), yr))
+    want = None
+    if kind == "tv" and intent.get("autoplay"):          # PEK's "Up next": play this episode straight away
+        try:
+            sn, ep = int(intent.get("season") or 0), int(intent.get("episode") or 0)
+        except (TypeError, ValueError):
+            sn = ep = 0
+        if sn > 0 and ep > 0:
+            want = (sn, ep)
+    open_detail(stub_item(tmdb_id, kind, str(intent.get("title") or "Loading\u2026"), yr), want=want)
 
 
 # ---------------------------------------------------------------- favorites, other plugins
@@ -988,15 +1057,44 @@ def load_season(d, n):
                              "still": e.get("still_path") or ""}
                             for e in (j.get("episodes") or [])]
         P["ep_loading"] = False
-        if P["pending"] and S["detail"] is d:
+        if P.get("want_ep") and S["detail"] is d:
+            play_wanted(d, n, P.pop("want_ep"))
+        elif P["pending"] and S["detail"] is d:
             start_play(d)
 
     def fail(msg):
         P["error"] = err_text(msg)
         P["pending"] = False
         P["ep_loading"] = False
+        P.pop("want_ep", None)
 
     ui.background(work, done, fail)
+
+
+def play_wanted(d, season, episode):
+    """PEK's player asked for the next episode ('Up next'): play it if it exists and has aired, else say why."""
+    P = play_state(d)
+    eps = P["episodes"].get(season, [])
+    e = next((x for x in eps if x["n"] == episode), None)
+    if not e and eps and episode > max(x["n"] or 0 for x in eps):
+        # Past the end of the season (PEK only counts +1): roll over to episode 1 of the next season, if the show has one.
+        later = sorted(s.get("season_number") for s in ((d.get("info") or {}).get("seasons") or [])
+                       if (s.get("season_number") or 0) > season and (s.get("episode_count") or 0) > 0)
+        if later:
+            nxt = later[0]
+            if nxt in P["episodes"]:
+                play_wanted(d, nxt, 1)
+            else:
+                P["want_ep"] = 1
+                load_season(d, nxt)
+            return
+    if not e:
+        P["notice"] = "No more episodes \u2014 that was the last one"
+        return
+    if not (e["air"] and e["air"] <= today()):
+        P["notice"] = "Not out yet \u2014 airs " + fmt_date(e["air"]) if e["air"] else "Not out yet"
+        return
+    find_and_play(d, season, episode, "%s S%02dE%02d" % (d["item"]["title"], season, episode))
 
 
 def pick_season(d, sid):
@@ -1033,7 +1131,8 @@ def start_stream(d, r, season, episode, label):
     try:
         ui.play_torrent(r["source"], label, season, episode,
                         "episode" if it["type"] == "tv" else "movie", it["title"],
-                        0 if it["type"] == "tv" else it["year"], it["poster_path"])
+                        0 if it["type"] == "tv" else it["year"], it["poster_path"],
+                        tmdb=it["id"])
         P["started"] = "Starting \u201c" + label + "\u201d\u2026"
     except PermissionError:
         P["error"] = "This plugin was installed without the torrent permission. Reinstall it."
@@ -1553,24 +1652,15 @@ def provider_buttons(item, info):
     return out
 
 
-def open_trailer_here(key):
-    S["trailer_open"] = key
-
-
 def detail_view():
     d = S["detail"]
     item = d["item"]
     info = d["info"] or {}
     kids = []
     trailer = None if (d["loading"] or d["error"]) else pick_trailer(info)
-    if trailer:      # the trailer goes first: PEK pins it to the very top of the page
-        tkey = "%s:%s" % (item["type"], item["id"])
-        if tv_mode() and not S["autoplay"] and S["trailer_open"] != tkey:
-            kids.append(ui.button("Watch trailer", lambda: open_trailer_here(tkey)))
-        else:
-            kids.append(ui.video(trailer["key"], autoplay=S["autoplay"] or S["trailer_open"] == tkey,
-                                 muted=not S["sound"], title=item["title"] + " trailer"))
-    back_btn = ui.button("Back", back, autofocus="" if tv_mode() else "detail:%s%s" % (item["type"], item["id"]))
+    if trailer:      # the trailer goes first: PEK pins it to the very top of the page (big, scrolls away and stops with the page)
+        kids.append(ui.video(trailer["key"], autoplay=S["autoplay"], muted=not S["sound"], title=item["title"] + " trailer"))
+    back_btn = ui.button("Back", back, autofocus="detail:%s%s" % (item["type"], item["id"]))
     if d["loading"]:
         kids.append(back_btn)
         kids.append(ui.spinner("Loading\u2026", True))
@@ -1689,7 +1779,7 @@ def settings_view():
     kids.append(ui.heading("Trailers"))
     kids.append(ui.toggle("Play trailers by themselves", S["autoplay"], lambda v: set_flag("autoplay", v)))
     kids.append(ui.toggle("Trailer sound", S["sound"], lambda v: set_flag("sound", v)))
-    kids.append(ui.text("Trailers come from YouTube. If your device blocks sound from starting by itself, turn Trailer sound off."))
+    kids.append(ui.text("Trailers play big at the top of a title. On a TV, press Up at the top of a title to fill the screen and Down to come back. If your device blocks sound from starting by itself, turn Trailer sound off."))
     kids.append(ui.heading("Playing"))
     kids.append(ui.toggle("Let me pick the stream myself (otherwise the best one is chosen automatically)", S["pick"],
                           lambda v: set_flag("pick", v)))
@@ -1732,6 +1822,7 @@ def browse_view():
 # ---------------------------------------------------------------- entry points
 def start():
     load_settings()
+    load_rows()
     read_library()
     refresh_library()
     S["region_draft"] = region()
