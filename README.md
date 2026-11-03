@@ -4,6 +4,10 @@ A third-party Hesper plugin with a streaming-app layout: **Home / Movies / TV Sh
 rows (trending, top rated, coming soon, genres), **Categories**, streaming-service filters, ratings on every
 poster, trailers, cast, director/creator, networks, and **Play**.
 
+## 3.7.2
+
+- **Continue watching a movie now plays it.** Picking Stream Media from a movie in Continue watching used to stop on the movie's page. It now finds a stream and starts it at once, and PEK TV resumes it from where you left off (needs the matching PEK TV update).
+
 ## 3.7.1
 
 - **Up next works again for streams.** PEK's player offers the next episode in the last minutes of an episode you started from this plugin; accepting it opens the plugin on that episode and starts the best stream automatically (needs the matching PEK TV update; older builds just have no card).

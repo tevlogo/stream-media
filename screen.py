@@ -897,7 +897,10 @@ def on_launch(intent):
             sn = ep = 0
         if sn > 0 and ep > 0:
             want = (sn, ep)
-    open_detail(stub_item(tmdb_id, kind, str(intent.get("title") or "Loading\u2026"), yr), want=want)
+    # PEK's Continue Watching opens a MOVIE with autoplay: find a stream and start it at once,
+    # so PEK can resume it from the saved spot, instead of stopping on the detail page. An episode is handled by `want` above.
+    auto = kind == "movie" and bool(intent.get("autoplay"))
+    open_detail(stub_item(tmdb_id, kind, str(intent.get("title") or "Loading\u2026"), yr), auto_play=auto, want=want)
 
 
 # ---------------------------------------------------------------- favorites, other plugins
