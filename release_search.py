@@ -246,27 +246,38 @@ def tag_text(t):
 
 _STEPS = [480, 720, 1080, 2160]
 
+# Used when the device profile is missing or untrustworthy: a modest phone, 720p, H.264 up to 1080p, no 10-bit / HDR.
+_SAFE_DEVICE = {"avc": 1080, "hevc": 720, "hevc10": 0, "av1": 0, "hdr_screen": False, "dv": False,
+                "tv": False, "short": 720, "target": 720, "big": False}
+
+# Hard limits for a device that is not "big" (GB). Season packs are exempt from the size limit.
+MAX_GB_MOVIE, MAX_GB_EPISODE = 2.0, 1.0
+
 
 def read_device(p):
     """Hesper's device profile (pek.device.profile()) -> what the ranking needs.
     None = nothing known (not the Android app, or the check failed): nothing changes then."""
-    if not isinstance(p, dict) or p.get("unknown") or p.get("v") != 1:
-        return None
+    if not isinstance(p, dict):
+        return None                                   # not the Android app: nothing to guard
+    if p.get("unknown") or p.get("v") != 1:
+        return dict(_SAFE_DEVICE)                     # app could not tell: assume a modest phone, do not drop the guard
     avc, hevc = int(p.get("h264") or 0), int(p.get("hevc") or 0)
     hevc10, av1 = int(p.get("hevc10") or 0), int(p.get("av1") or 0)
     if not avc and not hevc:
-        return None                                   # no hardware decoder reported at all: do not trust it
+        return dict(_SAFE_DEVICE)                     # no hardware decoder reported at all: assume a modest phone
     short, tv, hdr_screen = int(p.get("screenShort") or 0), p.get("tv") is True, p.get("hdr") is True
     # The tallest picture worth sending to this screen. A 1080p phone gets 4K only when it can show HDR10
     # AND decode 10-bit HEVC in hardware; a small / low-resolution screen gains nothing from more than 720p.
-    if tv or short >= 1440:
+    if tv:
         screen_cap = 2160
+    elif short >= 1440:
+        screen_cap = 2160 if (hdr_screen and hevc10 >= 2160) else 1080   # a sharp screen is not a fast chip
     elif short >= 1080:
         screen_cap = 2160 if (hdr_screen and hevc10 >= 2160) else 1080
     elif short >= 1000:
         screen_cap = 1080
     else:
-        screen_cap = 720 if short > 0 else 2160
+        screen_cap = 720 if short > 0 else 1080       # screen size unknown: assume ordinary, never 4K
     target = min(max(avc, hevc), screen_cap)
     return {"avc": avc, "hevc": hevc, "hevc10": hevc10, "av1": av1, "hdr_screen": hdr_screen,
             "dv": p.get("dv") is True, "tv": tv, "short": short, "target": target,
@@ -297,6 +308,26 @@ def device_fit(t, dev):
     if t["q"] == 2160 and not dev["tv"] and 0 < dev["short"] < 1000:
         adj -= 10                                     # 4K on a small screen: nothing to see
     return adj, heavy
+
+
+def over_limit(item, t, dev, season=0, episode=0):
+    """True when this release is too much for the device, whatever its seeders or score say.
+    Checked on the resolution, the remux / disc tags and the size, including when the name has no resolution
+    or the site gave no size (those cases used to slip past every penalty)."""
+    if not dev or dev["tv"] or dev["big"]:
+        return False
+    if t["q"] and t["q"] > dev["target"]:
+        return True                                   # taller than this screen / decoder is worth
+    if re.search(r"\b(remux|bdremux|uhd bluray|complete bluray|bluray disc)\b", normalize(item["title"])):
+        return True
+    if t["q"] == 0 and (t["hdr"] or t["bit10"]) and not dev["hdr_screen"]:
+        return True                                   # unlabelled but clearly an HDR / 10-bit encode
+    is_ep = bool(season and episode)
+    gb = item["size"] / 1073741824.0 if item["size"] > 1 else 0
+    if gb and not (is_ep and _episode_match(item["title"], season, episode) == "pack"):
+        if gb > (MAX_GB_EPISODE if is_ep else MAX_GB_MOVIE):
+            return True
+    return False
 
 
 def _quality_points(ql, dev):
@@ -369,6 +400,7 @@ def score_full(item, title, season=0, episode=0, year=0, dev=None):
     q = t["q"]
     total += _quality_points(q, dev)
     adj, heavy = device_fit(t, dev) if dev else (0, False)
+    heavy = heavy or over_limit(item, t, dev, season, episode)
     total += adj
     if re.search(r"\b(cam|camrip|hdcam|ts|hdts|telesync|tc)\b", norm):
         return None
@@ -420,6 +452,7 @@ def find_releases(title, season=0, episode=0, year=0, sites=None, dev=None):
         seen.add(key)
         ranked.append((full[0], it, full[1], full[2]))
     ranked.sort(key=lambda p: p[0], reverse=True)
+    ranked = keep_playable(ranked, lambda p: p[3])
     return [{
         "title": it["title"], "source": it["source"], "seeders": max(0, it["seeders"]),
         "size": it["size"], "size_text": _size_text(it["size"]), "quality": _quality(it["title"]),
@@ -428,6 +461,14 @@ def find_releases(title, season=0, episode=0, year=0, sites=None, dev=None):
     } for sc, it, tags, heavy in ranked][:25]
 
 
+def keep_playable(ranked, heavy_of):
+    """Drop everything flagged heavy. If that leaves nothing, keep the list (heavy last) so the caller can show it
+    but must not auto-play it."""
+    ok = [r for r in ranked if not heavy_of(r)]
+    return ok if ok else ranked
+
+
 def find_best_release(title, season=0, episode=0, year=0, sites=None, dev=None):
     found = find_releases(title, season, episode, year, sites, dev)
+    found = [f for f in found if not f["heavy"]]
     return found[0] if found else None

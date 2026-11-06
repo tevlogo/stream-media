@@ -219,6 +219,7 @@ def rank(items, title, season=0, episode=0, year=0, dev=None, compact=True):
         sc = full[0] if compact else full[0] + _compact_penalty(it, season, episode, dev)
         ranked.append((sc, it, full[1], full[2]))
     ranked.sort(key=lambda p: -p[0])
+    ranked = rs.keep_playable(ranked, lambda p: p[3])
     out = []
     for sc, it, tags, heavy in ranked[:25]:
         out.append({
@@ -240,5 +241,5 @@ def label_of(r):
     if r["pack"]:
         parts.append("season pack")
     if r["heavy"]:
-        parts.append("may stutter on this device")
+        parts.append("too heavy for this device")
     return " \u00b7 ".join(parts)

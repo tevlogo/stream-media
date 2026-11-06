@@ -1267,7 +1267,7 @@ def finish(job, ranked, note):
         P["none"] = True
         P["detail"] = note
         return
-    if not S["pick"]:
+    if not S["pick"] and not ranked[0]["heavy"]:       # never auto-play something flagged too heavy: list it instead
         start_stream(d, ranked[0], P["q_season"], P["ep"], P["label"])
 
 
