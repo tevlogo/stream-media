@@ -76,6 +76,7 @@ S = {
     "query": "",
     "sug": [],               # search suggestions for what is typed (items), shown under the search box
     "sug_cache": {},         # typed text (lower case) -> suggestion items
+    "sug_pool": [], "sug_busy": {}, "sug_typed": "", "sug_q": "",
     "show_cats": False,
     "hero_pick": {},
     "inflight": 0,           # browse pages being fetched (lazy rows wait their turn)
@@ -94,9 +95,9 @@ def tv_mode():
 def lay():
     if tv_mode():
         return {"per_row": 20, "genre_rows": 6, "col": 150, "hero": 170, "text": 400, "cast": 20, "related": 20,
-                "eps": 50, "facts": 4, "cast_col": 120}
+                "eps": 50, "facts": 4, "cast_col": 120, "list_col": 120}
     return {"per_row": 12, "genre_rows": 3, "col": 140, "hero": 120, "text": 140, "cast": 12, "related": 12,
-            "eps": 25, "facts": 2, "cast_col": 110}
+            "eps": 25, "facts": 2, "cast_col": 110, "list_col": 100}
 
 
 # ---------------------------------------------------------------- helpers
@@ -376,6 +377,21 @@ def page_key(src, page):
     return src["path"] + "?" + json.dumps(src.get("params") or {}, sort_keys=True) + "#" + str(page)
 
 
+# Talk, news and "Self" guest spots rank high by popularity but are not acting credits: an actor's list shows
+# real movies and shows first and puts these at the bottom.
+TALK_GENRES = (10767, 10763)          # TMDb: Talk, News
+SELF_WORDS = ("self", "himself", "herself", "themselves", "host", "presenter")
+
+
+def is_talk(r):
+    if any(g in TALK_GENRES for g in (r.get("genre_ids") or [])):
+        return True
+    if r.get("media_type") == "tv":
+        ch = str(r.get("character") or "").lower()
+        return any(ch == w or ch.startswith(w + " ") or ch.startswith(w + " -") or ch.startswith(w + "(") for w in SELF_WORDS)
+    return False
+
+
 def extract(src, j):
     if src.get("credits"):             # an actor's films and shows, best known first
         seen, res = {}, []
@@ -387,8 +403,8 @@ def extract(src, j):
                 continue
             seen[k] = 1
             res.append(r)
-        res.sort(key=lambda r: -(r.get("popularity") or 0))
-        return {"items": [map_item(r, r["media_type"]) for r in res[:60]], "total": 1}
+        res.sort(key=lambda r: (is_talk(r), -(r.get("popularity") or 0)))     # real titles first, talk shows last
+        return {"items": [map_item(r, r["media_type"]) for r in res[:120]], "total": 1}
     res = j.get("results", [])
     if src.get("multi"):
         res = [r for r in res if r.get("media_type") in ("movie", "tv")]
@@ -711,37 +727,115 @@ def set_query(v):
     S["query"] = v
 
 
+SUG_MAX = 6
+
+
+def sug_words(s):
+    t = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode("ascii").lower()
+    return re.findall(r"[a-z0-9]+", t)
+
+
+def sug_norm(s):
+    return " ".join(sug_words(s))
+
+
+def sug_score(it, qw, qn):
+    """How well a title fits what is typed: 0 = exactly it, 1 = starts with it, 2 = every typed word starts a word of the
+    title, 3 = the typed text is somewhere inside. None = no match."""
+    for name in (it.get("title"), it.get("alt")):
+        tw = sug_words(name)
+        tn = " ".join(tw)
+        if not tn:
+            continue
+        if tn == qn:
+            return 0
+        if tn.startswith(qn):
+            return 1
+        if all(any(w.startswith(x) for w in tw) for x in qw):
+            return 2
+        if qn in tn:
+            return 3
+    return None
+
+
+def sug_rank(items, q):
+    """Best fit first (then ones with a picture, then the order TMDb gave), no repeats. The same order every time, so the
+    list does not shuffle under the finger while the next letter is typed."""
+    qn = sug_norm(q)
+    qw = qn.split()
+    seen, out = set(), []
+    for i, it in enumerate(items):
+        k = (it.get("type"), it.get("id"))
+        if k in seen:
+            continue
+        seen.add(k)
+        sc = sug_score(it, qw, qn) if qn else None
+        out.append((9 if sc is None else sc, 0 if it.get("poster_path") else 1, i, it))
+    out.sort(key=lambda x: x[:3])
+    return [x[3] for x in out]
+
+
+def sug_local(q):
+    """What is already known (every earlier suggestion answer) that fits the typed text: shown at once, while the new
+    answer is on its way, so the list narrows as you type instead of going blank and coming back."""
+    qn = sug_norm(q)
+    if not qn:
+        return []
+    qw = qn.split()
+    hits = [it for it in S["sug_pool"] if sug_score(it, qw, qn) is not None]
+    return sug_rank(hits, q)[:SUG_MAX]
+
+
+def sug_close():
+    S["sug"] = []
+    S["sug_typed"] = ""          # an answer that arrives late must not open the list again
+
+
 def type_query(text):
-    """The search box paused (PEK calls this about 0.3 s after the last key): look up a few titles that match what is typed
-    and show them in a drop-down under the box, each with a small poster."""
+    """The search box paused (PEK calls this about 0.3 s after the last key): show the titles that match what is typed in a
+    drop-down under the box, each with a small poster. Known titles narrow instantly; the network only adds to them."""
     q = " ".join(str(text or "").split())
-    key = q.lower()
+    key = sug_norm(q) or q.lower()
     if len(q) < 2:
-        S["sug"] = []
+        sug_close()
         return
+    S["sug_typed"], S["sug_q"] = key, q
     if key in S["sug_cache"]:
         S["sug"] = S["sug_cache"][key]
         return
+    S["sug"] = sug_local(q)
+    if key in S["sug_busy"]:
+        return
+    S["sug_busy"][key] = True
 
     def work():
         return api("/search/multi", {"query": q, "include_adult": "false"})
 
     def done(j):
+        S["sug_busy"].pop(key, None)
         res = [r for r in (j.get("results") or []) if r.get("media_type") in ("movie", "tv")]
-        items = [map_item(r, "movie") for r in res]
-        items = [i for i in items if i["poster"]] + [i for i in items if not i["poster"]]     # ones with a picture first
-        items = items[:6]
-        if len(S["sug_cache"]) > 40:
-            S["sug_cache"] = {}
+        all_items = [map_item(r, "movie") for r in res]
+        items = sug_rank(all_items, q)[:SUG_MAX]
+        while len(S["sug_cache"]) >= 60:
+            S["sug_cache"].pop(next(iter(S["sug_cache"])))
         S["sug_cache"][key] = items
-        if " ".join(S["query"].split()).lower() == key:       # still what is in the box
+        S["sug_pool"] = sug_rank(all_items + S["sug_pool"], "")[:200]
+        cur = S.get("sug_typed") or ""
+        if not cur:
+            return
+        if cur == key:
             S["sug"] = items
+        else:                                      # typed on meanwhile: improve what is shown for the newest text
+            S["sug"] = S["sug_cache"].get(cur) or sug_local(S.get("sug_q") or "")
 
-    ui.background(work, done, lambda msg: None)
+    def fail(msg):
+        S["sug_busy"].pop(key, None)
+
+    ui.background(work, done, fail)
 
 
 def pick_suggestion(item):
-    S["sug"] = []
+    sug_close()
     open_detail(item)
 
 
@@ -765,7 +859,7 @@ def search_box():
 
 
 def do_search(term=None):
-    S["sug"] = []
+    sug_close()
     if term is not None:
         S["query"] = term
     term = S["query"].strip()
@@ -783,7 +877,7 @@ def do_search(term=None):
 def clear_search():
     reset_views()
     S["query"] = ""
-    S["sug"] = []
+    sug_close()
 
 
 def open_person(c):
@@ -887,7 +981,7 @@ def on_launch(intent):
     except (TypeError, ValueError):
         yr = 0
     S["query"] = ""
-    S["sug"] = []
+    sug_close()
     reset_views()
     want = None
     if kind == "tv" and intent.get("autoplay"):          # PEK's "Up next": play this episode straight away
@@ -1761,7 +1855,7 @@ def list_view():
         kids.append(ui.text("Nothing to show here."))
     else:
         fk = "list:%s:%d" % (cur["title"], cur["page"])
-        kids.append(ui.grid([poster(it, fk if i == 0 else "") for i, it in enumerate(e["items"])], min_col=lay()["col"]))
+        kids.append(ui.grid([poster(it, fk if i == 0 else "") for i, it in enumerate(e["items"])], min_col=lay()["list_col"]))
         if pg:
             kids.append(pager(cur))
     return ui.column(kids)
