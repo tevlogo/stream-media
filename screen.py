@@ -64,7 +64,7 @@ S = {
     "sound": True,           # trailer sound
     "compact": True,         # prefer smaller releases: they start sooner and scrub smoother
     "fit": True,             # rank releases for the device when PEK reports what it can decode
-    "pick": False,           # True = show the release list and let me choose
+    "tier": "",              # 'High' | 'Medium' | 'Low': the quality last tapped in a version list ('' = none yet)
     "tab": "home",           # 'home' | 'movie' | 'tv' | 'settings'
     "provider": 0,           # TMDb provider id, 0 = all services
     "providers": {"movie": None, "tv": None},
@@ -310,7 +310,8 @@ def load_settings():
     S["sound"] = j.get("sound") is not False
     S["compact"] = j.get("compact") is not False
     S["fit"] = j.get("fit") is not False
-    S["pick"] = j.get("pick") is True
+    t = str(j.get("tier") or "")
+    S["tier"] = t if t in ss.TIERS else ""
 
 
 def save_settings():
@@ -322,8 +323,8 @@ def save_settings():
     for name in ("autoplay", "sound", "compact", "fit"):
         if not S[name]:
             data[name] = False
-    if S["pick"]:
-        data["pick"] = True
+    if S["tier"]:
+        data["tier"] = S["tier"]
     try:
         h.write_json(SETTINGS, data)
         return True
@@ -958,7 +959,7 @@ def open_detail(item, auto_play=False, want=None):
             if ds:
                 load_season(d, ds)
         if auto_play and S["detail"] is d:
-            start_play(d)
+            start_play(d, auto=True)
 
     def fail(msg):
         if is_auth(msg):
@@ -1191,7 +1192,7 @@ def play_wanted(d, season, episode):
     if not (e["air"] and e["air"] <= today()):
         P["notice"] = "Not out yet \u2014 airs " + fmt_date(e["air"]) if e["air"] else "Not out yet"
         return
-    find_and_play(d, season, episode, "%s S%02dE%02d" % (d["item"]["title"], season, episode))
+    find_and_play(d, season, episode, "%s S%02dE%02d" % (d["item"]["title"], season, episode), auto=True)
 
 
 def pick_season(d, sid):
@@ -1241,6 +1242,8 @@ def play_release(d, r):
     P = play_state(d)
     if P["searching"]:
         return
+    S["tier"] = ss.tier_of(r)       # remembered: Up next / Continue watching / Resume start this quality next time
+    save_settings()
     start_stream(d, r, P["q_season"], P["ep"], P["label"])
 
 
@@ -1248,7 +1251,7 @@ def site_report(job):
     return " | ".join(job["report"])
 
 
-def find_and_play(d, season, episode, label):
+def find_and_play(d, season, episode, label, auto=False):
     P = play_state(d)
     it = d["item"]
     if P["searching"]:
@@ -1269,7 +1272,7 @@ def find_and_play(d, season, episode, label):
             attempts.append((t, False, group))      # some sites do better without the year
     job = {"id": P["job"], "d": d, "season": season if is_tv else 0, "episode": episode if is_tv else 0,
            "year": 0 if is_tv else it["year"], "attempts": attempts, "ai": 0, "items": [], "report": [],
-           "left": 0, "errors": 0, "n_sites": 0, "answered": 0}
+           "left": 0, "errors": 0, "n_sites": 0, "answered": 0, "auto": auto}
     start_attempt(job)
 
 
@@ -1361,11 +1364,16 @@ def finish(job, ranked, note):
         P["none"] = True
         P["detail"] = note
         return
-    if not S["pick"] and not ranked[0]["heavy"]:       # never auto-play something flagged too heavy: list it instead
-        start_stream(d, ranked[0], P["q_season"], P["ep"], P["label"])
+    # The Play button always shows the list. Only PEK's own "Up next" / "Continue watching" / Resume start one by themselves
+    # (they have no screen to choose on): the quality the person last chose, or the next one up if there is none of that
+    # quality (then the ones below). Something flagged too heavy is listed instead.
+    if job.get("auto"):
+        pick = ss.pick_for_tier(ranked, S["tier"])
+        if pick:
+            start_stream(d, pick, P["q_season"], P["ep"], P["label"])
 
 
-def start_play(d):
+def start_play(d, auto=False):
     """The Play button: checks 'not out yet', picks the movie or the first aired episode, then searches and streams."""
     it = d["item"]
     info = d["info"] or {}
@@ -1380,7 +1388,7 @@ def start_play(d):
         return
     if it["type"] == "movie":
         P["pending"] = False
-        find_and_play(d, 0, 0, it["title"] + (" (%d)" % it["year"] if it["year"] else ""))
+        find_and_play(d, 0, 0, it["title"] + (" (%d)" % it["year"] if it["year"] else ""), auto=auto)
         return
     if not P["season"]:
         P["notice"] = "Not out yet"
@@ -1394,7 +1402,7 @@ def start_play(d):
     if not ep:
         P["notice"] = "Not out yet \u2014 no episode of this season has aired"
         return
-    find_and_play(d, P["season"], ep["n"], "%s S%02dE%02d" % (it["title"], P["season"], ep["n"]))
+    find_and_play(d, P["season"], ep["n"], "%s S%02dE%02d" % (it["title"], P["season"], ep["n"]), auto=auto)
 
 
 def play_button_label(d):
@@ -1412,7 +1420,7 @@ def status_block(d):
     P = play_state(d)
     out = []
     if P["searching"]:
-        out.append(ui.spinner("Finding the best stream for " + P["label"] + "\u2026"))
+        out.append(ui.spinner("Finding streams for " + P["label"] + "\u2026"))
     if P["started"] and not P["searching"]:
         out.append(ui.text(P["started"]))
     if P["notice"]:
@@ -1421,8 +1429,6 @@ def status_block(d):
     if P["none"]:
         out.append(ui.card("No streaming links available",
                            "Nothing playable was found for " + (P["label"] or d["item"]["title"]) + ". Try again later."))
-        if P["detail"]:
-            out.append(ui.text(P["detail"]))
     if P["error"]:
         out.append(ui.text(P["error"]))
     return out
@@ -1490,14 +1496,14 @@ def watch_block(d):
                             if rel["date"] and rel["date"] > today() else "No release date announced yet."))
         return kids
     kids.append(ui.button(play_button_label(d), lambda: start_play(d), primary=True, autofocus="play:%s%s" % (it["type"], it["id"])))
-    kids.append(ui.text("You will be asked to choose a release." if S["pick"] else "The best available stream is chosen automatically."))
+    kids.append(ui.text("Press Play, then choose a version."))
     kids.extend(status_block(d))
     if it["type"] == "tv":
         kids.extend(episode_rows(d))
     if P["results"] and not P["searching"]:
-        kids.append(ui.heading("Choose a stream" if S["pick"] else "Other sources"))
-        for r in P["results"][:10]:
-            kids.append(ui.list_row(ss.label_of(r), r["title"], lambda r=r: play_release(d, r)))
+        kids.append(ui.heading("Choose a version"))
+        for r in ss.choices(P["results"]):
+            kids.append(ui.list_row(ss.tier_of(r) + " quality", ss.simple_sub(r), lambda r=r: play_release(d, r)))
     return kids
 
 
@@ -1878,8 +1884,6 @@ def settings_view():
     kids.append(ui.toggle("Trailer sound", S["sound"], lambda v: set_flag("sound", v)))
     kids.append(ui.text("Trailers play big at the top of a title. On a TV, press Up at the top of a title to fill the screen and Down to come back. If your device blocks sound from starting by itself, turn Trailer sound off."))
     kids.append(ui.heading("Playing"))
-    kids.append(ui.toggle("Let me pick the stream myself (otherwise the best one is chosen automatically)", S["pick"],
-                          lambda v: set_flag("pick", v)))
     kids.append(ui.toggle("Prefer smaller files (starts sooner and scrubs smoother on slower connections)", S["compact"],
                           lambda v: set_flag("compact", v)))
     if rs.read_device(ui.ctx().get("device")):

@@ -243,3 +243,55 @@ def label_of(r):
     if r["heavy"]:
         parts.append("too heavy for this device")
     return " \u00b7 ".join(parts)
+
+
+# ---- what the person sees: High / Medium / Low, nothing technical ----
+TIERS = ("High", "Medium", "Low")
+
+
+def tier_of(r):
+    """High = 1080p and up, Medium = 720p (or not stated), Low = smaller than that."""
+    q = r.get("quality") or 0
+    if q >= 1080:
+        return "High"
+    if q == 0 or q >= 720:
+        return "Medium"
+    return "Low"
+
+
+def pick_for_tier(results, preferred):
+    """The release PEK's Up next / Continue watching / Resume should start by themselves.
+
+    Looks for the quality the person last chose: first that tier, then the tiers above it (nearest first), then the tiers
+    below it (nearest first). Inside a tier the best-ranked release that is not flagged too heavy wins. With no remembered
+    choice it is simply the best-ranked release that is not too heavy. None when nothing qualifies (the list is shown)."""
+    ok = [r for r in results or [] if not r.get("heavy")]
+    if not ok:
+        return None
+    if preferred not in TIERS:
+        return ok[0]
+    i = TIERS.index(preferred)
+    order = [TIERS[i]] + [TIERS[k] for k in range(i - 1, -1, -1)] + [TIERS[k] for k in range(i + 1, len(TIERS))]
+    for name in order:
+        for r in ok:
+            if tier_of(r) == name:
+                return r
+    return ok[0]
+
+
+def simple_sub(r):
+    """Under the quality: just the size (and a warning when this device may struggle with it)."""
+    parts = [r["size_text"]] if r.get("size_text") else []
+    if r.get("heavy"):
+        parts.append("may stutter on this device")
+    return " \u00b7 ".join(parts)
+
+
+def choices(results, per_tier=4):
+    """The versions to show: High first, then Medium, then Low, each in the order they were ranked (at most [per_tier] of each)."""
+    tiers = {name: [] for name in TIERS}
+    for r in results or []:
+        lst = tiers[tier_of(r)]
+        if len(lst) < per_tier:
+            lst.append(r)
+    return [r for name in TIERS for r in tiers[name]]

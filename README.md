@@ -4,6 +4,15 @@ A third-party Hesper plugin with a streaming-app layout: **Home / Movies / TV Sh
 rows (trending, top rated, coming soon, genres), **Categories**, streaming-service filters, ratings on every
 poster, trailers, cast, director/creator, networks, and **Play**.
 
+## 3.9.0
+
+- **Up next, Continue watching and Resume keep your quality.** The quality you last tapped in the version list (High, Medium or Low) is remembered. When PEK starts a stream by itself it looks for that quality first. If there is none of it, it takes the next one up (Low goes to Medium, then High). If nothing higher exists either, it falls back to the nearest lower one. Streams flagged too heavy for the device are still skipped, and before you have ever chosen, the best match starts as before.
+
+## 3.8.0
+
+- **You choose the stream.** Play no longer starts a stream by itself. It finds the available streams and lists them as **High**, **Medium** or **Low** quality (High = 1080p and up, Medium = 720p, Low = smaller), each with its size. Tap one and it plays as before. The technical details (codec tags, seeders, search-site reports, season-pack notes) are gone from the list. PEK's own "Up next" and "Continue watching" still start the best stream at once, because they have no screen to choose on.
+- The "Let me pick the stream myself" setting is removed: choosing is now the only way.
+
 ## 3.7.2
 
 - **Continue watching a movie now plays it.** Picking Stream Media from a movie in Continue watching used to stop on the movie's page. It now finds a stream and starts it at once, and PEK TV resumes it from where you left off (needs the matching PEK TV update).
@@ -37,9 +46,7 @@ bigger posters, categories open and the menu bar first (remote friendly) on TV.
 
 Stream Media's built-in release search builds a query for that title/episode, fetches and scores the results, then Hesper buffers the start
 and opens the player while the rest downloads. Closing the player stops the torrent and deletes the
-temporary data. If several releases are found, the best match (quality + seeders) plays; turn on
-**Settings > Playing > Let me choose the release** to pick yourself. After playing, "Other releases"
-lists the alternatives in case one was bad.
+temporary data. The found streams are listed by quality (best match first within each) and you tap the one you want.
 
 ## What you need
 1. **Nothing to set up for TMDb.** This plugin's own TMDb worker is used (see snake-skin-tmdb-worker.js). Optional: paste your own free v3 API key (themoviedb.org > Settings > API) in this plugin's Settings tab to use that instead.
